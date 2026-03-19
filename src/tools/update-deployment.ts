@@ -1,11 +1,14 @@
 import { z } from 'zod';
+import {
+  generateManifest,
+  generateManifestVersion,
+  yaml,
+  type SDLInput,
+} from '@akashnetwork/chain-sdk';
 import type { ToolDefinition, ToolContext } from '../types/index.js';
-import { MsgUpdateDeployment } from '@akashnetwork/akash-api/akash/deployment/v1beta3';
-import { SDL } from '@akashnetwork/akashjs/build/sdl/SDL/SDL.js';
 import { createOutput } from '../utils/create-output.js';
-import { getTypeUrl } from '@akashnetwork/akashjs/build/stargate/index.js';
 import { sendManifest } from './send-manifest.js';
-import { queryLeases } from '../utils/query-leases.js';
+
 const parameters = z.object({
   rawSDL: z.string().min(1),
   provider: z.string().min(1),
@@ -15,63 +18,77 @@ const parameters = z.object({
 export const UpdateDeploymentTool: ToolDefinition<typeof parameters> = {
   name: 'update-deployment',
   description:
-    'Update a deployment on Akash Network using the provided SDL (Service Definition Language) string. This tool also sends the manifest to the provider.' +
-    'The dseq is the deployment sequence number.' +
-    'The provider is the provider of the lease.',
+    'Update a deployment on Akash Network using the provided SDL string. '
+    + 'Also sends the updated manifest to the provider. '
+    + 'The dseq is the deployment sequence number. '
+    + 'The provider is the provider of the lease.',
   parameters,
-  handler: async (params: z.infer<typeof parameters>, context: ToolContext) => {
-    const { rawSDL, provider } = params;
-    const { wallet, client, certificate } = context;
+  handler: async (params, context) => {
+    const { rawSDL, provider, dseq } = params;
+    const { wallet, sdk, certificate } = context;
 
     try {
-      // Parse SDL directly from the string
-      const sdl = SDL.fromString(rawSDL, 'beta3');
       const accounts = await wallet.getAccounts();
+      const address = accounts[0].address;
 
-      if (!accounts || accounts.length === 0) {
-        return createOutput({ error: 'No accounts found in wallet' });
+      // Parse the SDL and generate the manifest.
+      const sdlInput: SDLInput = yaml.raw(rawSDL);
+      const manifest = generateManifest(sdlInput);
+
+      if (!manifest.ok) {
+        return createOutput({
+          error: 'SDL validation failed: '
+            + JSON.stringify(manifest.value),
+        });
       }
 
-      const leases = await queryLeases(accounts[0].address, params.dseq, provider);
+      // Generate the manifest version hash for the update message.
+      const hash = await generateManifestVersion(
+        manifest.value.groups,
+      );
+
+      // Update the deployment on chain.
+      await sdk.akash.deployment.v1beta4.updateDeployment({
+        id: { owner: address, dseq: BigInt(dseq) },
+        hash,
+      });
+
+      // Find the active lease so we can send the manifest to the provider.
+      const leases = await sdk.akash.market.v1beta5.getLeases({
+        filters: {
+          owner: address,
+          dseq: BigInt(dseq),
+          provider,
+        },
+      });
 
       if (leases.leases.length === 0) {
-        return createOutput({ error: 'No leases found for deployment' });
+        return createOutput({
+          error: 'No leases found for deployment',
+        });
       }
 
-      const lease = leases.leases[0];
-
-      const msg = {
-        typeUrl: getTypeUrl(MsgUpdateDeployment),
-        value: MsgUpdateDeployment.fromPartial({
-          id: {
-            owner: accounts[0].address,
-            dseq: params.dseq,
-          },
-          version: await sdl.manifestVersion(),
-        }),
-      };
-
-      const tx = await client.signAndBroadcast(accounts[0].address, [msg], 'auto');
-
+      const lease = leases.leases[0].lease;
       const leaseId = {
         id: {
-          owner: lease.lease?.leaseId?.owner ?? '',
-          dseq: lease.lease?.leaseId?.dseq.toNumber() ?? 0,
-          gseq: lease.lease?.leaseId?.gseq ?? 0,
-          oseq: lease.lease?.leaseId?.oseq ?? 0,
-          provider: lease.lease?.leaseId?.provider ?? '',
+          owner: lease?.id?.owner ?? '',
+          dseq: Number(lease?.id?.dseq ?? 0),
+          gseq: lease?.id?.gseq ?? 0,
+          oseq: lease?.id?.oseq ?? 0,
+          provider: lease?.id?.provider ?? '',
         },
       };
 
-      // Send manifest to provider
-      await sendManifest(sdl, leaseId, certificate);
+      // Send the updated manifest to the provider.
+      // sendManifest still uses the old SDL type — will be migrated separately.
+      await sendManifest(sdlInput as any, leaseId, certificate);
 
-      return createOutput(tx.rawLog);
-    } catch (error: any) {
-      console.error('Error updating deployment:', error);
-      return createOutput({
-        error: error.message || 'Unknown error updating deployment',
-      });
+      return createOutput({ success: true, dseq });
+    } catch (error: unknown) {
+      const message = error instanceof Error
+        ? error.message
+        : 'Unknown error updating deployment';
+      return createOutput({ error: message });
     }
   },
 };

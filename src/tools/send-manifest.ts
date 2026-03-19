@@ -1,15 +1,19 @@
 import { z } from 'zod';
-import type { ToolDefinition, ToolContext, CustomLease, CustomLeaseID } from '../types/index.js';
-import { SDL } from '@akashnetwork/akashjs/build/sdl/SDL/SDL.js';
-import { getRpc } from '@akashnetwork/akashjs/build/rpc/index.js';
-import { createOutput } from '../utils/create-output.js';
 import https from 'https';
-import { SERVER_CONFIG } from '../config.js';
 import {
-  QueryClientImpl as QueryProviderClient,
-  QueryProviderRequest,
-} from '@akashnetwork/akash-api/akash/provider/v1beta3';
-import type { CertificatePem } from '@akashnetwork/akashjs/build/certificates/certificate-manager/CertificateManager.js';
+  generateManifest,
+  manifestToSortedJSON,
+  yaml,
+  type SDLInput,
+  type CertificatePem,
+} from '@akashnetwork/chain-sdk';
+import type {
+  ToolDefinition,
+  ToolContext,
+  CustomLease,
+  CustomLeaseID,
+} from '../types/index.js';
+import { createOutput } from '../utils/create-output.js';
 
 const parameters = z.object({
   sdl: z.string().min(1),
@@ -23,15 +27,15 @@ const parameters = z.object({
 export const SendManifestTool: ToolDefinition<typeof parameters> = {
   name: 'send-manifest',
   description:
-    'Send a manifest to a provider using the provided SDL, owner, dseq, gseq, oseq and provider.',
+    'Send a manifest to a provider using the provided SDL,'
+    + ' owner, dseq, gseq, oseq and provider.',
   parameters,
-  handler: async (params: z.infer<typeof parameters>, context: ToolContext) => {
-    const { wallet, certificate } = context;
+  handler: async (params, context) => {
+    const { certificate } = context;
 
-    // Parse SDL
-    const sdl = SDL.fromString(params.sdl, 'beta3');
+    // Parse the raw SDL string into a structured object.
+    const sdlInput: SDLInput = yaml.raw(params.sdl);
 
-    // Create lease object with our custom type
     const lease: CustomLeaseID = {
       owner: params.owner,
       dseq: params.dseq,
@@ -41,39 +45,60 @@ export const SendManifestTool: ToolDefinition<typeof parameters> = {
     };
 
     try {
-      await sendManifest(sdl, { id: lease }, certificate);
+      await sendManifest(
+        sdlInput,
+        { id: lease },
+        certificate,
+        context,
+      );
       return createOutput('Manifest sent successfully');
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      return createOutput(`Error sending manifest: ${errorMessage}`);
+      const message = error instanceof Error
+        ? error.message
+        : String(error);
+      return createOutput(`Error sending manifest: ${message}`);
     }
   },
 };
 
-export async function sendManifest(sdl: SDL, lease: CustomLease, certificate: CertificatePem) {
+/**
+ * Sends the deployment manifest to the provider via HTTPS.
+ * Uses mTLS with the certificate for authentication.
+ */
+export async function sendManifest(
+  sdlInput: SDLInput,
+  lease: CustomLease,
+  certificate: CertificatePem,
+  context: ToolContext,
+) {
   if (!lease.id) {
     throw new Error('Lease ID is undefined');
   }
 
   const { dseq, provider } = lease.id;
-  const rpc = await getRpc(SERVER_CONFIG.rpcEndpoint);
 
-  const client = new QueryProviderClient(rpc);
-  const request = QueryProviderRequest.fromPartial({
-    owner: provider,
-  });
+  // Look up the provider's host URI from the chain.
+  const providerRes = await context.sdk.akash
+    .provider.v1beta4.getProvider({ owner: provider });
 
-  const tx = await client.Provider(request);
-
-  if (tx.provider === undefined) {
+  if (!providerRes.provider) {
     throw new Error(`Could not find provider ${provider}`);
   }
 
-  const providerInfo = tx.provider;
-  const manifest = sdl.manifestSortedJSON();
-  const path = `/deployment/${dseq}/manifest`;
+  // Generate the manifest and serialize it as sorted JSON.
+  const manifest = generateManifest(sdlInput);
 
-  const uri = new URL(providerInfo.hostUri);
+  if (!manifest.ok) {
+    throw new Error(
+      'SDL validation failed: '
+      + JSON.stringify(manifest.value),
+    );
+  }
+
+  const body = manifestToSortedJSON(manifest.value.groups);
+  const uri = new URL(providerRes.provider.hostUri);
+
+  // mTLS agent — the provider authenticates us via our certificate.
   const agent = new https.Agent({
     cert: certificate.cert,
     key: certificate.privateKey,
@@ -85,33 +110,31 @@ export async function sendManifest(sdl: SDL, lease: CustomLease, certificate: Ce
       {
         hostname: uri.hostname,
         port: uri.port,
-        path: path,
+        path: `/deployment/${dseq}/manifest`,
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           Accept: 'application/json',
-          'Content-Length': manifest.length,
+          'Content-Length': body.length,
         },
-        agent: agent,
+        agent,
       },
       (res) => {
         res.on('error', reject);
-
-        res.on('data', (chunk) => {
-          // Helpful for debugging
-          //console.warn("Response:", chunk.toString());
-        });
+        res.on('data', () => {});
 
         if (res.statusCode !== 200) {
-          return reject(`Could not send manifest: ${res.statusCode}`);
+          return reject(
+            new Error(`Could not send manifest: ${res.statusCode}`),
+          );
         }
 
         resolve();
-      }
+      },
     );
 
     req.on('error', reject);
-    req.write(manifest);
+    req.write(body);
     req.end();
   });
 }

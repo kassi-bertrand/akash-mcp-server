@@ -80,8 +80,7 @@ export const UpdateDeploymentTool: ToolDefinition<typeof parameters> = {
       };
 
       // Send the updated manifest to the provider.
-      // sendManifest still uses the old SDL type — will be migrated separately.
-      await sendManifest(sdlInput as any, leaseId, certificate);
+      await sendManifest(sdlInput, leaseId, certificate, context);
 
       return createOutput({ success: true, dseq });
     } catch (error: unknown) {

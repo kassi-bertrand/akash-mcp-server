@@ -17,6 +17,7 @@
   "dependencies": {
     "@akashnetwork/akash-api": "^1.4.0",
     "@akashnetwork/akashjs": "^0.11.1",
+    "@akashnetwork/chain-sdk": "1.0.0-alpha.27",
     "@cosmjs/proto-signing": "^0.32.4",
     "@cosmjs/stargate": "^0.32.4",
     "@modelcontextprotocol/sdk": "^1.8.0",

@@ -3,6 +3,7 @@ export const SERVER_CONFIG = {
   version: '1.0.0',
   port: process.env.PORT || 3000,
   environment: process.env.NODE_ENV || 'development',
+  grpcEndpoint: process.env.GRPC_ENDPOINT || 'https://grpc.akashnet.net:443',
   rpcEndpoint: process.env.RPC_ENDPOINT || 'https://rpc.akashnet.net:443',
   mnemonic: process.env.AKASH_MNEMONIC || '',
 } as const;

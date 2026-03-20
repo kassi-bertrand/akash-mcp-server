@@ -1,14 +1,8 @@
 import { z } from 'zod';
-import type { ToolDefinition, ToolContext } from '../types/index.js';
 import https from 'https';
+import type { CertificatePem } from '@akashnetwork/chain-sdk';
+import type { ToolDefinition, ToolContext } from '../types/index.js';
 import { createOutput } from '../utils/create-output.js';
-import { getRpc } from '@akashnetwork/akashjs/build/rpc/index.js';
-import { SERVER_CONFIG } from '../config.js';
-import {
-  QueryClientImpl as QueryProviderClient,
-  QueryProviderRequest,
-} from '@akashnetwork/akash-api/akash/provider/v1beta3';
-import { Lease } from '@akashnetwork/akash-api/akash/market/v1beta4';
 
 const parameters = z.object({
   owner: z.string().min(1),
@@ -18,105 +12,88 @@ const parameters = z.object({
   provider: z.string().min(1),
 });
 
-// Custom interfaces for our implementation
-interface LeaseID {
-  owner: string;
-  dseq: number;
-  gseq: number;
-  oseq: number;
-  provider: string;
-}
-
-interface CustomLease {
-  id: LeaseID;
-}
-
 export const GetServicesTool: ToolDefinition<typeof parameters> = {
   name: 'get-services',
   description:
-    'Get the services and their URIs for a lease on Akash Network using the provided owner, dseq, gseq, oseq and provider.',
+    'Get the services and their URIs for a lease on Akash Network.'
+    + ' Requires owner, dseq, gseq, oseq, and provider.',
   parameters,
-  handler: async (params: z.infer<typeof parameters>, context: ToolContext) => {
-    const { certificate } = context;
-
-    // Create lease object with our custom type
-    const lease: CustomLease = {
-      id: {
-        owner: params.owner,
-        dseq: params.dseq,
-        gseq: params.gseq,
-        oseq: params.oseq,
-        provider: params.provider,
-      },
-    };
+  handler: async (params, context) => {
+    const { sdk, certificate } = context;
 
     try {
-      // Get provider URI
-      const rpc = await getRpc(SERVER_CONFIG.rpcEndpoint);
-      const client = new QueryProviderClient(rpc);
-      const request = QueryProviderRequest.fromPartial({
-        owner: params.provider,
-      });
+      // Look up the provider's host URI from the chain.
+      const providerRes = await sdk.akash
+        .provider.v1beta4.getProvider({ owner: params.provider });
 
-      const tx = await client.Provider(request);
-
-      if (tx.provider === undefined) {
-        throw new Error(`Could not find provider ${params.provider}`);
+      if (!providerRes.provider) {
+        return createOutput({
+          error: `Could not find provider ${params.provider}`,
+        });
       }
 
-      const providerInfo = tx.provider;
+      // Query the provider's REST endpoint for lease status.
+      const status = await queryLeaseStatus(
+        params,
+        providerRes.provider.hostUri,
+        certificate,
+      );
 
-      // Query lease status
-      const leaseStatus = await queryLeaseStatus(lease, providerInfo.hostUri, certificate);
-
-      return createOutput(leaseStatus);
+      return createOutput(status);
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      return createOutput(`Error getting services: ${errorMessage}`);
+      const message = error instanceof Error
+        ? error.message
+        : 'Failed to fetch services';
+      return createOutput({ error: message });
     }
   },
 };
 
-async function queryLeaseStatus(lease: CustomLease, providerUri: string, certificate: any) {
-  const id = lease.id;
+/**
+ * Queries the provider's HTTPS endpoint for lease status.
+ * Uses mTLS with the certificate for authentication.
+ */
+async function queryLeaseStatus(
+  leaseId: { dseq: number; gseq: number; oseq: number },
+  providerUri: string,
+  certificate: CertificatePem,
+) {
+  const { dseq, gseq, oseq } = leaseId;
+  const uri = new URL(providerUri);
 
-  if (id === undefined) {
-    throw new Error('Lease ID is undefined');
-  }
-
-  const leasePath = `/lease/${id.dseq}/${id.gseq}/${id.oseq}/status`;
-
+  // mTLS agent — the provider authenticates us via our certificate.
   const agent = new https.Agent({
     cert: certificate.cert,
     key: certificate.privateKey,
     rejectUnauthorized: false,
   });
 
-  const uri = new URL(providerUri);
-
-  return await new Promise<{ services: Record<string, { uris: string[] }> }>((resolve, reject) => {
+  return await new Promise<unknown>((resolve, reject) => {
     const req = https.request(
       {
         hostname: uri.hostname,
         port: uri.port,
-        path: leasePath,
+        path: `/lease/${dseq}/${gseq}/${oseq}/status`,
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
           Accept: 'application/json',
         },
-        agent: agent,
+        agent,
       },
       (res) => {
         if (res.statusCode !== 200) {
-          return reject(`Could not query lease status: ${res.statusCode}`);
+          return reject(
+            new Error(
+              `Could not query lease status: ${res.statusCode}`,
+            ),
+          );
         }
 
         let data = '';
-
         res.on('data', (chunk) => (data += chunk));
         res.on('end', () => resolve(JSON.parse(data)));
-      }
+      },
     );
 
     req.on('error', reject);

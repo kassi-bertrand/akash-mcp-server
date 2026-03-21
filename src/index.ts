@@ -1,39 +1,48 @@
+import { createServer } from 'http';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import AkashMCP from './AkashMCP.js';
+import { SERVER_CONFIG } from './config.js';
 
 async function main() {
   const server = new AkashMCP();
-  const transport = new StdioServerTransport();
 
-  try {
-    // Initialize the server
-    await server.initialize();
-    server.registerTools();
+  await server.initialize();
+  server.registerTools();
 
-    if (!server.isInitialized()) {
-      throw new Error('Server failed to initialize properly');
-    }
+  if (!server.isInitialized()) {
+    throw new Error('Server failed to initialize properly');
+  }
 
-    // Connect the transport
+  // HTTP mode when TRANSPORT=http (for Akash / remote deployment).
+  // Stdio mode otherwise (for local MCP clients like Claude Desktop).
+  const mode = process.env.TRANSPORT || 'stdio';
+
+  if (mode === 'http') {
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined, // stateless — no session tracking
+    });
+
     await server.connect(transport);
 
-    // Handle graceful shutdown
-    process.on('SIGINT', () => {
-      console.log('Shutting down...');
-      process.exit(0);
+    const port = Number(SERVER_CONFIG.port);
+    const httpServer = createServer((req, res) => {
+      void transport.handleRequest(req, res);
     });
 
-    process.on('SIGTERM', () => {
-      console.log('Shutting down...');
-      process.exit(0);
+    httpServer.listen(port, () => {
+      console.log(`Akash MCP server listening on port ${port}`);
     });
-  } catch (error) {
-    console.error('Fatal error:', error);
-    process.exit(1);
+  } else {
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
   }
+
+  process.on('SIGINT', () => process.exit(0));
+  process.on('SIGTERM', () => process.exit(0));
 }
 
 main().catch((error) => {
-  console.error('Unhandled error:', error);
+  console.error('Fatal error:', error);
   process.exit(1);
 });

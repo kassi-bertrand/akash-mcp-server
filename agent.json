@@ -1,0 +1,38 @@
+{
+  "name": "akash-mcp",
+  "version": "0.0.1",
+  "type": "agent",
+  "deploy": {
+    "akash": {
+      "target": "akash",
+      "network": "mainnet",
+      "deposit": "5",
+      "services": {
+        "mcp": {
+          "image": "akash-mcp:0.0.1",
+          "expose": [
+            {
+              "port": 3000,
+              "as": 80,
+              "to": [{ "global": true }]
+            }
+          ],
+          "resources": {
+            "cpu": 1,
+            "memory": "1Gi",
+            "ephemeralStorage": "4Gi"
+          },
+          "pricing": {
+            "amount": "500",
+            "denom": "uakt"
+          }
+        }
+      },
+      "secrets": {
+        "vault": "akash-mcp",
+        "required": ["AKASH_MNEMONIC"],
+        "delivery": "env"
+      }
+    }
+  }
+}

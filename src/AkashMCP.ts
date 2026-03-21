@@ -1,6 +1,6 @@
 import type { DirectSecp256k1HdWallet } from '@cosmjs/proto-signing';
-import type { SigningStargateClient } from '@cosmjs/stargate';
-import { loadWalletAndClient, loadCertificate } from './utils/index.js';
+import type { CertificatePem } from '@akashnetwork/chain-sdk';
+import { loadWalletAndSdk, loadCertificate, type ChainSDK } from './utils/index.js';
 import { SERVER_CONFIG } from './config.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
@@ -19,11 +19,10 @@ import {
   GetDeploymentTool,
 } from './tools/index.js';
 import type { ToolContext } from './types/index.js';
-import type { CertificatePem } from '@akashnetwork/akashjs/build/certificates/certificate-manager/CertificateManager.js';
 
 class AkashMCP extends McpServer {
   private wallet: DirectSecp256k1HdWallet | null = null;
-  private client: SigningStargateClient | null = null;
+  private sdk: ChainSDK | null = null;
   private certificate: CertificatePem | null = null;
 
   constructor() {
@@ -38,125 +37,100 @@ class AkashMCP extends McpServer {
       throw new Error('MCP server not initialized');
     }
     return {
-      client: this.client!,
+      sdk: this.sdk!,
       wallet: this.wallet!,
       certificate: this.certificate!,
     };
   }
 
-  public getClient(): SigningStargateClient {
-    if (!this.client) {
-      throw new Error('Client not initialized');
-    }
-    return this.client;
-  }
-
   public async initialize() {
-    try {
-      const { wallet, client } = await loadWalletAndClient();
-      this.wallet = wallet;
-      this.client = client;
-      this.certificate = await loadCertificate(wallet, client);
-    } catch (error) {
-      console.error('Failed to initialize MCP server:', error);
-      throw error;
-    }
+    const { wallet, sdk } = await loadWalletAndSdk();
+    this.wallet = wallet;
+    this.sdk = sdk;
+    this.certificate = await loadCertificate(wallet, sdk);
   }
 
   public registerTools() {
-    this.tool(
+    this.registerTool(
       GetAccountAddrTool.name,
-      GetAccountAddrTool.description,
-      GetAccountAddrTool.parameters.shape,
-      async (args, extra) => GetAccountAddrTool.handler(args, this.getToolContext())
+      { description: GetAccountAddrTool.description, inputSchema: GetAccountAddrTool.parameters },
+      async (args) => GetAccountAddrTool.handler(args, this.getToolContext())
     );
 
-    this.tool(
+    this.registerTool(
       GetBidsTool.name,
-      GetBidsTool.description,
-      GetBidsTool.parameters.shape,
-      async (args, extra) => GetBidsTool.handler(args, this.getToolContext())
+      { description: GetBidsTool.description, inputSchema: GetBidsTool.parameters },
+      async (args) => GetBidsTool.handler(args, this.getToolContext())
     );
 
-    this.tool(
+    this.registerTool(
       CreateDeploymentTool.name,
-      CreateDeploymentTool.description,
-      CreateDeploymentTool.parameters.shape,
-      async (args, extra) => CreateDeploymentTool.handler(args, this.getToolContext())
+      { description: CreateDeploymentTool.description, inputSchema: CreateDeploymentTool.parameters },
+      async (args) => CreateDeploymentTool.handler(args, this.getToolContext())
     );
 
-    this.tool(
+    this.registerTool(
       GetSDLsTool.name,
-      GetSDLsTool.description,
-      GetSDLsTool.parameters.shape,
-      async (args, extra) => GetSDLsTool.handler(args, this.getToolContext())
+      { description: GetSDLsTool.description, inputSchema: GetSDLsTool.parameters },
+      async (args) => GetSDLsTool.handler(args, this.getToolContext())
     );
 
-    this.tool(
+    this.registerTool(
       GetSDLTool.name,
-      GetSDLTool.description,
-      GetSDLTool.parameters.shape,
-      async (args, extra) => GetSDLTool.handler(args, this.getToolContext())
+      { description: GetSDLTool.description, inputSchema: GetSDLTool.parameters },
+      async (args) => GetSDLTool.handler(args, this.getToolContext())
     );
 
-    this.tool(
+    this.registerTool(
       SendManifestTool.name,
-      SendManifestTool.description,
-      SendManifestTool.parameters.shape,
-      async (args, extra) => SendManifestTool.handler(args, this.getToolContext())
+      { description: SendManifestTool.description, inputSchema: SendManifestTool.parameters },
+      async (args) => SendManifestTool.handler(args, this.getToolContext())
     );
 
-    this.tool(
+    this.registerTool(
       CreateLeaseTool.name,
-      CreateLeaseTool.description,
-      CreateLeaseTool.parameters.shape,
-      async (args, extra) => CreateLeaseTool.handler(args, this.getToolContext())
+      { description: CreateLeaseTool.description, inputSchema: CreateLeaseTool.parameters },
+      async (args) => CreateLeaseTool.handler(args, this.getToolContext())
     );
 
-    this.tool(
+    this.registerTool(
       GetServicesTool.name,
-      GetServicesTool.description,
-      GetServicesTool.parameters.shape,
-      async (args, extra) => GetServicesTool.handler(args, this.getToolContext())
+      { description: GetServicesTool.description, inputSchema: GetServicesTool.parameters },
+      async (args) => GetServicesTool.handler(args, this.getToolContext())
     );
 
-    this.tool(
+    this.registerTool(
       UpdateDeploymentTool.name,
-      UpdateDeploymentTool.description,
-      UpdateDeploymentTool.parameters.shape,
-      async (args, extra) => UpdateDeploymentTool.handler(args, this.getToolContext())
+      { description: UpdateDeploymentTool.description, inputSchema: UpdateDeploymentTool.parameters },
+      async (args) => UpdateDeploymentTool.handler(args, this.getToolContext())
     );
 
-    this.tool(
+    this.registerTool(
       AddFundsTool.name,
-      AddFundsTool.description,
-      AddFundsTool.parameters.shape,
-      async (args, extra) => AddFundsTool.handler(args, this.getToolContext())
+      { description: AddFundsTool.description, inputSchema: AddFundsTool.parameters },
+      async (args) => AddFundsTool.handler(args, this.getToolContext())
     );
 
-    this.tool(
+    this.registerTool(
       GetBalancesTool.name,
-      GetBalancesTool.description,
-      GetBalancesTool.parameters.shape,
-      async (args, extra) => GetBalancesTool.handler(args, this.getToolContext())
+      { description: GetBalancesTool.description, inputSchema: GetBalancesTool.parameters },
+      async (args) => GetBalancesTool.handler(args, this.getToolContext())
     );
 
-    this.tool(
+    this.registerTool(
       CloseDeploymentTool.name,
-      CloseDeploymentTool.description,
-      CloseDeploymentTool.parameters.shape,
-      async (args, extra) => CloseDeploymentTool.handler(args, this.getToolContext())
+      { description: CloseDeploymentTool.description, inputSchema: CloseDeploymentTool.parameters },
+      async (args) => CloseDeploymentTool.handler(args, this.getToolContext())
     );
 
-    this.tool(
+    this.registerTool(
       GetDeploymentTool.name,
-      GetDeploymentTool.description,
-      GetDeploymentTool.parameters.shape,
-      async (args, extra) => GetDeploymentTool.handler(args, this.getToolContext())
+      { description: GetDeploymentTool.description, inputSchema: GetDeploymentTool.parameters },
+      async (args) => GetDeploymentTool.handler(args, this.getToolContext())
     );
   }
   public isInitialized(): boolean {
-    return this.wallet !== null && this.client !== null && this.certificate !== null;
+    return this.wallet !== null && this.sdk !== null && this.certificate !== null;
   }
 }
 

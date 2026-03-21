@@ -1,4 +1,4 @@
-export { loadWalletAndClient } from './load-wallet.js';
+export { loadWalletAndSdk, type ChainSDK } from './load-wallet.js';
 export { loadCertificate } from './load-certificate.js';
 export { createOutput } from './create-output.js';
 export { getSDLTemplate } from './get-sdl-template.js';

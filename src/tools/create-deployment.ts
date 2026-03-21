@@ -1,9 +1,12 @@
 import { z } from 'zod';
+import {
+  generateManifest,
+  generateManifestVersion,
+  yaml,
+  type SDLInput,
+} from '@akashnetwork/chain-sdk';
 import type { ToolDefinition, ToolContext } from '../types/index.js';
-import { MsgCreateDeployment } from '@akashnetwork/akash-api/akash/deployment/v1beta3';
-import { SDL } from '@akashnetwork/akashjs/build/sdl/SDL/SDL.js';
 import { createOutput } from '../utils/create-output.js';
-import { getTypeUrl } from '@akashnetwork/akashjs/build/stargate/index.js';
 
 const parameters = z.object({
   rawSDL: z.string().min(1),
@@ -14,53 +17,58 @@ const parameters = z.object({
 export const CreateDeploymentTool: ToolDefinition<typeof parameters> = {
   name: 'create-deployment',
   description:
-    'Create a new deployment on Akash Network using the provided SDL (Service Definition Language) string, deposit amount and currency.' +
-    'The deposit amount is the amount of tokens to deposit into the deployment.' +
-    'Minimum deposit amount is 500000 uakt.',
+    'Create a new deployment on Akash Network using the provided'
+    + ' SDL string, deposit amount and currency.'
+    + ' Minimum deposit amount is 500000 uakt.',
   parameters,
-  handler: async (params: z.infer<typeof parameters>, context: ToolContext) => {
+  handler: async (params, context) => {
     const { rawSDL } = params;
-    const { wallet, client } = context;
+    const { wallet, sdk } = context;
 
     try {
-      // Parse SDL directly from the string
-      const sdl = SDL.fromString(rawSDL, 'beta3');
-
-      const blockheight = await client.getHeight();
-      const groups = sdl.groups();
       const accounts = await wallet.getAccounts();
+      const address = accounts[0].address;
 
-      if (!accounts || accounts.length === 0) {
-        return createOutput({ error: 'No accounts found in wallet' });
+      // Parse the SDL and generate the manifest.
+      const sdlInput: SDLInput = yaml.raw(rawSDL);
+      const manifest = generateManifest(sdlInput);
+
+      if (!manifest.ok) {
+        return createOutput({
+          error: 'SDL validation failed: '
+            + JSON.stringify(manifest.value),
+        });
       }
 
-      const deployment = {
-        id: {
-          owner: accounts[0].address,
-          dseq: blockheight,
-        },
-        groups: groups,
+      // Manifest version hash, needed by the chain.
+      const hash = await generateManifestVersion(
+        manifest.value.groups,
+      );
+
+      // Use current block height as the deployment sequence number.
+      const block = await sdk.cosmos.base.tendermint.v1beta1
+        .getLatestBlock({});
+      const dseq = Number(block.block?.header?.height ?? 0);
+
+      await sdk.akash.deployment.v1beta4.createDeployment({
+        id: { owner: address, dseq: BigInt(dseq) },
+        groups: manifest.value.groupSpecs,
+        hash,
         deposit: {
-          denom: params.currency,
-          amount: params.deposit.toString(),
+          amount: {
+            denom: params.currency,
+            amount: params.deposit.toString(),
+          },
+          sources: [1], // Pay from the server wallet's own balance.
         },
-        version: await sdl.manifestVersion(),
-        depositor: accounts[0].address,
-      };
-
-      const msg = {
-        typeUrl: getTypeUrl(MsgCreateDeployment),
-        value: MsgCreateDeployment.fromPartial(deployment),
-      };
-
-      const tx = await client.signAndBroadcast(accounts[0].address, [msg], 'auto');
-
-      return createOutput(tx.rawLog);
-    } catch (error: any) {
-      console.error('Error creating deployment:', error);
-      return createOutput({
-        error: error.message || 'Unknown error creating deployment',
       });
+
+      return createOutput({ success: true, dseq });
+    } catch (error: unknown) {
+      const message = error instanceof Error
+        ? error.message
+        : 'Unknown error creating deployment';
+      return createOutput({ error: message });
     }
   },
 };

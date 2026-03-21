@@ -1,43 +1,54 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import * as cert from '@akashnetwork/akashjs/build/certificates/index.js';
-import { certificateManager } from '@akashnetwork/akashjs/build/certificates/certificate-manager/index.js';
+import {
+  certificateManager,
+  type CertificatePem,
+} from '@akashnetwork/chain-sdk';
 import type { DirectSecp256k1HdWallet } from '@cosmjs/proto-signing';
-import type { SigningStargateClient } from '@cosmjs/stargate';
-import type { CertificatePem } from '@akashnetwork/akashjs/build/certificates/certificate-manager/CertificateManager.js';
+import type { ChainSDK } from './load-wallet.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+/**
+ * Loads an existing certificate from disk, or creates and publishes
+ * a new one to the Akash blockchain. Certificates are needed for
+ * mTLS communication with providers.
+ */
 export async function loadCertificate(
   wallet: DirectSecp256k1HdWallet,
-  client: SigningStargateClient
+  sdk: ChainSDK,
 ): Promise<CertificatePem> {
   const accounts = await wallet.getAccounts();
+  const address = accounts[0].address;
   const certificatesDir = path.resolve(__dirname, './certificates');
 
-  // Ensure certificates directory exists
   if (!fs.existsSync(certificatesDir)) {
     fs.mkdirSync(certificatesDir, { recursive: true });
   }
 
-  const certificatePath = path.resolve(certificatesDir, `${accounts[0].address}.json`);
+  const certificatePath = path.resolve(
+    certificatesDir,
+    `${address}.json`,
+  );
 
-  // check to see if we can load the certificate
+  // Return cached certificate if one exists on disk.
   if (fs.existsSync(certificatePath)) {
     return JSON.parse(fs.readFileSync(certificatePath, 'utf8'));
   }
 
-  // if not, create a new one
-  const certificate = certificateManager.generatePEM(accounts[0].address);
-  const result = await cert.broadcastCertificate(certificate, accounts[0].address, client);
+  // Generate a new certificate and publish it to the blockchain.
+  const certificate = await certificateManager.generatePEM(address);
 
-  if (result.code === 0) {
-    // save the certificate
-    fs.writeFileSync(certificatePath, JSON.stringify(certificate));
-    return certificate;
-  }
+  await sdk.akash.cert.v1.createCertificate({
+    owner: address,
+    cert: new Uint8Array(Buffer.from(certificate.cert)),
+    pubkey: new Uint8Array(Buffer.from(certificate.publicKey)),
+  });
 
-  throw new Error(`Could not create certificate: ${result.rawLog} `);
+  // Cache to disk so we don't recreate on next startup.
+  fs.writeFileSync(certificatePath, JSON.stringify(certificate));
+
+  return certificate;
 }

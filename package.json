@@ -10,22 +10,24 @@
     "dev:watch": "tsc --watch",
     "lint": "eslint . --ext .ts",
     "lint:fix": "eslint . --ext .ts --fix",
-    "format": "prettier --write \"**/*.{ts,js,json,md}\""
+    "format": "prettier --write \"**/*.{ts,js,json,md}\"",
+    "docker:build": "docker build --platform linux/amd64 -t akash-mcp .",
+    "sandbox": "npm run build && ./scripts/sandbox.sh",
+    "test:nginx": "npm run build && AKASH_MNEMONIC=\"$(kadi secret get AKASH_WALLET -v global)\" npx tsx scripts/test-tools.ts",
+    "test:gpu": "npm run build && AKASH_MNEMONIC=\"$(kadi secret get AKASH_WALLET -v global)\" npx tsx scripts/test-gpu.ts"
   },
   "author": "Overclock Labs, Inc.",
   "license": "Apache-2.0",
   "dependencies": {
-    "@akashnetwork/akash-api": "^1.4.0",
-    "@akashnetwork/akashjs": "^0.11.1",
+    "@akashnetwork/chain-sdk": "1.0.0-alpha.27",
     "@cosmjs/proto-signing": "^0.32.4",
-    "@cosmjs/stargate": "^0.32.4",
-    "@modelcontextprotocol/sdk": "^1.8.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "fs": "0.0.1-security",
     "https": "^1.0.0",
     "js-yaml": "^4.1.0",
     "lodash": "^4.17.21",
     "path": "^0.12.7",
-    "zod": "^3.22.4"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@eslint/js": "^9.23.0",
@@ -38,6 +40,7 @@
     "prettier": "^3.5.3",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.8.2",
     "typescript-eslint": "^8.29.0"
   }

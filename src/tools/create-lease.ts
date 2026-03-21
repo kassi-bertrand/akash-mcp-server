@@ -1,12 +1,5 @@
 import { z } from 'zod';
 import type { ToolDefinition, ToolContext } from '../types/index.js';
-import {
-  BidID,
-  Lease,
-  LeaseID,
-  MsgCreateLease,
-} from '@akashnetwork/akash-api/akash/market/v1beta4';
-import { getTypeUrl } from '@akashnetwork/akashjs/build/stargate/index.js';
 import { createOutput } from '../utils/create-output.js';
 
 const parameters = z.object({
@@ -20,26 +13,30 @@ const parameters = z.object({
 export const CreateLeaseTool: ToolDefinition<typeof parameters> = {
   name: 'create-lease',
   description:
-    'Create a lease on Akash Network using the provided owner, dseq, gseq, oseq and provider from a bid.',
+    'Create a lease on Akash Network by accepting a bid.'
+    + ' Requires owner, dseq, gseq, oseq and provider.',
   parameters,
-  handler: async (params: z.infer<typeof parameters>, context: ToolContext) => {
-    const { client, wallet } = context;
-    const accounts = await wallet.getAccounts();
-    const bid = BidID.fromPartial({
-      owner: params.owner,
-      dseq: params.dseq,
-      gseq: params.gseq,
-      oseq: params.oseq,
-      provider: params.provider,
-    });
+  handler: async (params, context) => {
+    const { sdk } = context;
 
-    const lease = MsgCreateLease.fromPartial({ bidId: bid });
-    const msg = {
-      typeUrl: getTypeUrl(MsgCreateLease),
-      value: lease,
-    };
+    try {
+      await sdk.akash.market.v1beta5.createLease({
+        bidId: {
+          owner: params.owner,
+          dseq: BigInt(params.dseq),
+          gseq: params.gseq,
+          oseq: params.oseq,
+          provider: params.provider,
+          bseq: 0,
+        },
+      });
 
-    const tx = await client.signAndBroadcast(accounts[0].address, [msg], 'auto');
-    return createOutput(tx.rawLog);
+      return createOutput({ success: true, ...params });
+    } catch (error: unknown) {
+      const message = error instanceof Error
+        ? error.message
+        : 'Unknown error creating lease';
+      return createOutput({ error: message });
+    }
   },
 };

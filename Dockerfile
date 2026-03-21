@@ -5,8 +5,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
-COPY awesome-akash ./awesome-akash
-RUN npm run build
+RUN npx tsc
 
 # Stage 2: Runtime — only production deps + compiled output
 FROM --platform=linux/amd64 node:22-slim

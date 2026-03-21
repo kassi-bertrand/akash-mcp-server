@@ -2,4 +2,5 @@ node_modules
 dist
 .git
 *.md
-scripts
+scripts/test-*.ts
+scripts/sandbox.sh

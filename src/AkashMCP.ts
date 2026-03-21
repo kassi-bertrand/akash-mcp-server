@@ -50,6 +50,13 @@ class AkashMCP extends McpServer {
     this.certificate = await loadCertificate(wallet, sdk);
   }
 
+  /** Copy wallet, SDK, and certificate from another instance. */
+  public shareState(source: AkashMCP) {
+    this.wallet = source.wallet;
+    this.sdk = source.sdk;
+    this.certificate = source.certificate;
+  }
+
   public registerTools() {
     this.registerTool(
       GetAccountAddrTool.name,

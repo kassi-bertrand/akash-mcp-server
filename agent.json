@@ -9,7 +9,7 @@
       "deposit": "5",
       "services": {
         "mcp": {
-          "image": "akash-mcp:0.0.1",
+          "image": "akash-mcp:0.0.3",
           "expose": [
             {
               "port": 3000,

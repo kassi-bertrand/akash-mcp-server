@@ -11,8 +11,10 @@
     "lint": "eslint . --ext .ts",
     "lint:fix": "eslint . --ext .ts --fix",
     "format": "prettier --write \"**/*.{ts,js,json,md}\"",
+    "docker:build": "docker build --platform linux/amd64 -t akash-mcp .",
     "sandbox": "npm run build && ./scripts/sandbox.sh",
-    "test:sandbox": "npm run build && npx tsx scripts/test-tools.ts"
+    "test:nginx": "npm run build && AKASH_MNEMONIC=\"$(kadi secret get AKASH_WALLET -v global)\" npx tsx scripts/test-tools.ts",
+    "test:gpu": "npm run build && AKASH_MNEMONIC=\"$(kadi secret get AKASH_WALLET -v global)\" npx tsx scripts/test-gpu.ts"
   },
   "author": "Overclock Labs, Inc.",
   "license": "Apache-2.0",

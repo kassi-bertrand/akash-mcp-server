@@ -62,17 +62,19 @@ async function queryLeaseStatus(
   const uri = new URL(providerUri);
 
   // mTLS agent — the provider authenticates us via our certificate.
+  // servername must be empty to disable SNI, which some providers require.
   const agent = new https.Agent({
     cert: certificate.cert,
     key: certificate.privateKey,
     rejectUnauthorized: false,
+    servername: '',
   });
 
   return await new Promise<unknown>((resolve, reject) => {
     const req = https.request(
       {
         hostname: uri.hostname,
-        port: uri.port,
+        port: uri.port || '8443',
         path: `/lease/${dseq}/${gseq}/${oseq}/status`,
         method: 'GET',
         headers: {

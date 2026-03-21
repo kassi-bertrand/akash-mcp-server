@@ -99,23 +99,25 @@ export async function sendManifest(
   const uri = new URL(providerRes.provider.hostUri);
 
   // mTLS agent — the provider authenticates us via our certificate.
+  // servername must be empty to disable SNI, which some providers require.
   const agent = new https.Agent({
     cert: certificate.cert,
     key: certificate.privateKey,
     rejectUnauthorized: false,
+    servername: '',
   });
 
   return await new Promise<void>((resolve, reject) => {
     const req = https.request(
       {
         hostname: uri.hostname,
-        port: uri.port,
+        port: uri.port || '8443',
         path: `/deployment/${dseq}/manifest`,
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           Accept: 'application/json',
-          'Content-Length': body.length,
+          'Content-Length': Buffer.byteLength(body, 'utf8'),
         },
         agent,
       },

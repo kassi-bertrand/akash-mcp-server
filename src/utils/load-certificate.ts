@@ -28,7 +28,10 @@ export async function loadCertificate(
     fs.mkdirSync(certificatesDir, { recursive: true });
   }
 
-  const certificatePath = path.resolve(certificatesDir, `${address}.json`);
+  const certificatePath = path.resolve(
+    certificatesDir,
+    `${address}.json`,
+  );
 
   // Return cached certificate if one exists on disk.
   if (fs.existsSync(certificatePath)) {
@@ -40,8 +43,8 @@ export async function loadCertificate(
 
   await sdk.akash.cert.v1.createCertificate({
     owner: address,
-    cert: Buffer.from(certificate.cert, 'utf-8'),
-    pubkey: Buffer.from(certificate.publicKey, 'utf-8'),
+    cert: new Uint8Array(Buffer.from(certificate.cert)),
+    pubkey: new Uint8Array(Buffer.from(certificate.publicKey)),
   });
 
   // Cache to disk so we don't recreate on next startup.

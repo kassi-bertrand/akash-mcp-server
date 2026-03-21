@@ -12,6 +12,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 // A minimal SDL that deploys an nginx container.
+// UPDATE_SDL bumps memory to 256Mi — used to test update-deployment
+// (the chain rejects updates with the same hash).
 const TEST_SDL = `
 version: "2.0"
 services:
@@ -30,6 +32,39 @@ profiles:
           units: 0.5
         memory:
           size: 512Mi
+        storage:
+          size: 1Gi
+  placement:
+    dcloud:
+      pricing:
+        web:
+          denom: uakt
+          amount: 1000
+deployment:
+  web:
+    dcloud:
+      profile: web
+      count: 1
+`;
+
+const UPDATE_SDL = `
+version: "2.0"
+services:
+  web:
+    image: nginx
+    expose:
+      - port: 80
+        as: 80
+        to:
+          - global: true
+profiles:
+  compute:
+    web:
+      resources:
+        cpu:
+          units: 0.5
+        memory:
+          size: 1Gi
         storage:
           size: 1Gi
   placement:
@@ -115,12 +150,10 @@ async function main() {
   console.log('\n━━━ Phase 1: Read-only queries ━━━');
 
   // Get account address from the server wallet.
-  const account = await callTool(client, 'get-account-addr') as {
-    address?: string;
-  };
-  const address = account.address ?? '';
+  // The tool returns the address as a plain string.
+  const address = await callTool(client, 'get-akash-account-addr') as string;
 
-  if (!address) {
+  if (!address || !address.startsWith('akash')) {
     console.error('No address returned, cannot continue.');
     await client.close();
     process.exit(1);
@@ -130,7 +163,7 @@ async function main() {
   await callTool(client, 'get-akash-balances', { address });
 
   // List SDL templates (may be empty if submodule not initialized).
-  await callTool(client, 'get-sdls', { page: 1, limit: 5 });
+  await callTool(client, 'get-sdl-templates', { page: 1, limit: 5 });
 
   // ── Phase 2: Full deployment flow ────────────────
 
@@ -156,24 +189,25 @@ async function main() {
   console.log('\n⏳ Waiting 15s for bids...');
   await new Promise((r) => setTimeout(r, 15_000));
 
-  const bids = await callTool(client, 'get-bids', {
+  // The tool returns an array of { bid, escrowAccount } objects.
+  // Each bid has an `id` with owner, dseq, gseq, oseq, provider.
+  const bidList = await callTool(client, 'get-bids', {
     dseq,
     owner: address,
-  }) as { bids?: { bid?: { bidId?: {
+  }) as { bid?: { id?: {
     provider?: string;
     gseq?: number;
     oseq?: number;
-  } } }[] };
+  } } }[];
 
-  const bidList = bids.bids ?? [];
-  if (bidList.length === 0) {
+  if (!Array.isArray(bidList) || bidList.length === 0) {
     console.error('No bids received. Closing deployment and exiting.');
     await callTool(client, 'close-deployment', { dseq });
     await client.close();
     process.exit(1);
   }
 
-  const firstBid = bidList[0].bid?.bidId;
+  const firstBid = bidList[0].bid?.id;
   const provider = firstBid?.provider ?? '';
   const gseq = firstBid?.gseq ?? 1;
   const oseq = firstBid?.oseq ?? 1;
@@ -198,18 +232,77 @@ async function main() {
     provider,
   });
 
-  // Step 5: Wait for provider to start services.
-  console.log('\n⏳ Waiting 10s for services to start...');
-  await new Promise((r) => setTimeout(r, 10_000));
+  // Step 5: Poll until all services are ready (like deploy-ability does).
+  // Checks every 10s for up to 5 minutes.
+  console.log('\n⏳ Waiting for services to become ready...');
+  const POLL_INTERVAL = 10_000;
+  const MAX_WAIT = 300_000;
+  const start = Date.now();
+  let services: Record<string, unknown> = {};
 
-  // Step 6: Get service status.
-  await callTool(client, 'get-services', {
-    owner: address,
-    dseq,
-    gseq,
-    oseq,
-    provider,
-  });
+  while (Date.now() - start < MAX_WAIT) {
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+
+    services = await callTool(client, 'get-services', {
+      owner: address,
+      dseq,
+      gseq,
+      oseq,
+      provider,
+    }) as Record<string, unknown>;
+
+    // Check if all services have ready_replicas >= total.
+    const svcEntries = (services as any)?.services;
+    if (svcEntries && typeof svcEntries === 'object') {
+      const allReady = Object.entries(svcEntries).every(
+        ([, svc]: [string, any]) => {
+          const total = Math.max(svc?.total ?? 1, 1);
+          return (svc?.ready_replicas ?? 0) >= total;
+        },
+      );
+
+      // Log readiness summary.
+      const summary = Object.entries(svcEntries)
+        .map(([name, svc]: [string, any]) =>
+          `${name}: ${svc?.ready_replicas ?? 0}/${Math.max(svc?.total ?? 1, 1)}`)
+        .join(', ');
+      console.log(`   ${summary}`);
+
+      if (allReady) {
+        console.log('✅ All services ready.');
+        break;
+      }
+    }
+  }
+
+  // Step 6: If we got service URIs, hit one to verify it's live.
+  try {
+    const svcEntries = (services as any)?.services;
+    let serviceUrl: string | null = null;
+
+    if (svcEntries && typeof svcEntries === 'object') {
+      for (const [, svc] of Object.entries(svcEntries) as [string, any][]) {
+        const uris: string[] = svc?.uris ?? [];
+        if (uris.length > 0) {
+          serviceUrl = `http://${uris[0]}`;
+          break;
+        }
+      }
+    }
+
+    if (serviceUrl) {
+      console.log(`\n🌐 Checking deployed service at ${serviceUrl}...`);
+      const res = await fetch(serviceUrl);
+      const body = await res.text();
+      const isNginx = body.includes('nginx') || body.includes('Welcome');
+      console.log(`   HTTP ${res.status} — ${isNginx ? 'nginx is live!' : 'got a response'}`);
+    } else {
+      console.log('\n⚠️  No service URIs found to verify.');
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.log(`\n⚠️  Could not reach deployed service: ${msg}`);
+  }
 
   // Step 7: Get deployment details.
   await callTool(client, 'get-deployment', {
@@ -226,7 +319,7 @@ async function main() {
 
   // Step 9: Update deployment with same SDL (just to test the flow).
   await callTool(client, 'update-deployment', {
-    rawSDL: TEST_SDL,
+    rawSDL: UPDATE_SDL,
     provider,
     dseq,
   });

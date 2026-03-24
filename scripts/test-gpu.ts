@@ -66,7 +66,7 @@ profiles:
           - akash1365yvmc4s7awdyj3n2sav7xfx76adc6dnmlx63
       pricing:
         gpu-test:
-          denom: uakt
+          denom: uact
           amount: 100000
 deployment:
   gpu-test:
@@ -140,8 +140,8 @@ async function main() {
   // Create GPU deployment.
   const deployment = await callTool(client, 'create-deployment', {
     rawSDL: GPU_SDL,
-    deposit: 50000000,
-    currency: 'uakt',
+    deposit: 5000000,
+    currency: 'uact',
   }) as { dseq?: number; error?: string };
 
   if (deployment.error || !deployment.dseq) {

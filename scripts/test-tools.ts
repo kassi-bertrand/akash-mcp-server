@@ -38,7 +38,7 @@ profiles:
     dcloud:
       pricing:
         web:
-          denom: uakt
+          denom: uact
           amount: 1000
 deployment:
   web:
@@ -71,7 +71,7 @@ profiles:
     dcloud:
       pricing:
         web:
-          denom: uakt
+          denom: uact
           amount: 1000
 deployment:
   web:
@@ -173,7 +173,7 @@ async function main() {
   const deployment = await callTool(client, 'create-deployment', {
     rawSDL: TEST_SDL,
     deposit: 5000000,
-    currency: 'uakt',
+    currency: 'uact',
   }) as { dseq?: number; error?: string };
 
   if (deployment.error || !deployment.dseq) {

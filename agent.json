@@ -6,14 +6,18 @@
     "akash": {
       "target": "akash",
       "network": "mainnet",
+      "blacklist":[
+        "akash1sjwuwre4qprcaa34f6324yz7m8nn0awvc75gp5",
+        "akash1sevd2ymtty3dpq9ycxgkhuzzk4fe6mchqdwd4e"
+      ],
       "deposit": "5",
       "services": {
         "mcp": {
-          "image": "akash-mcp:0.0.4",
+          "image": "akash-mcp:0.0.5",
           "expose": [
             {
               "port": 3000,
-              "as": 80,
+              "as": 3000,
               "to": [{ "global": true }]
             }
           ],

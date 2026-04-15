@@ -20,6 +20,69 @@ import {
 } from './tools/index.js';
 import type { ToolContext } from './types/index.js';
 
+/** Compact one-line summary of tool params, omitting large values like SDL. */
+function summarizeParams(args: Record<string, unknown>): string {
+  const parts: string[] = [];
+  for (const [key, val] of Object.entries(args)) {
+    if (val == null) continue;
+    const str = typeof val === 'object' ? JSON.stringify(val) : String(val);
+    if (str.length > 80) {
+      parts.push(`${key}=<${str.length} chars>`);
+    } else {
+      parts.push(`${key}=${str}`);
+    }
+  }
+  return parts.length > 0 ? ` (${parts.join(', ')})` : '';
+}
+
+/** Extract key fields from tool results so operators can see what happened without digging into raw responses. */
+function summarizeResult(toolName: string, result: any): string {
+  try {
+    // MCP results wrap content in { content: [{ type, text }] }
+    const text = result?.content?.[0]?.text;
+    const data = text ? JSON.parse(text) : result;
+
+    switch (toolName) {
+      case 'create-deployment':
+        return data?.dseq ? `dseq=${data.dseq}` : '';
+      case 'get-bids': {
+        const bids = Array.isArray(data) ? data : (data?.bids ?? []);
+        return `${bids.length} bid(s)`;
+      }
+      case 'create-lease':
+        return data?.provider ? `provider=${data.provider}` : '';
+      case 'get-services': {
+        const ports = Array.isArray(data?.forwarded_ports) ? data.forwarded_ports : [];
+        const services = data?.services ? Object.keys(data.services).length : 0;
+        return `${services} service(s), ${ports.length} port(s)`;
+      }
+      case 'add-funds':
+        return data?.amount ? `deposited=${data.amount}` : '';
+      case 'get-deployment': {
+        const escrow = data?.escrowAccount ?? data?.escrow_account;
+        const balance = escrow?.balance?.amount ?? escrow?.funds?.amount;
+        const state = data?.deployment?.state ?? data?.deployment?.deploymentState;
+        return [
+          state != null ? `state=${state}` : '',
+          balance != null ? `escrow=${balance}` : '',
+        ].filter(Boolean).join(', ');
+      }
+      case 'get-akash-balances': {
+        const balances = Array.isArray(data) ? data : (data?.balances ?? []);
+        return balances.map((b: any) => `${b.amount} ${b.denom}`).join(', ');
+      }
+      case 'close-deployment':
+        return 'closed';
+      case 'get-akash-account-addr':
+        return typeof data === 'string' ? data : (data?.address ?? '');
+      default:
+        return '';
+    }
+  } catch {
+    return '';
+  }
+}
+
 class AkashMCP extends McpServer {
   private wallet: DirectSecp256k1HdWallet | null = null;
   private sdk: ChainSDK | null = null;
@@ -58,84 +121,44 @@ class AkashMCP extends McpServer {
   }
 
   public registerTools() {
-    this.registerTool(
-      GetAccountAddrTool.name,
-      { description: GetAccountAddrTool.description, inputSchema: GetAccountAddrTool.parameters },
-      async (args) => GetAccountAddrTool.handler(args, this.getToolContext())
-    );
+    const tools = [
+      GetAccountAddrTool,
+      GetBidsTool,
+      CreateDeploymentTool,
+      GetSDLsTool,
+      GetSDLTool,
+      SendManifestTool,
+      CreateLeaseTool,
+      GetServicesTool,
+      UpdateDeploymentTool,
+      AddFundsTool,
+      GetBalancesTool,
+      CloseDeploymentTool,
+      GetDeploymentTool,
+    ];
 
-    this.registerTool(
-      GetBidsTool.name,
-      { description: GetBidsTool.description, inputSchema: GetBidsTool.parameters },
-      async (args) => GetBidsTool.handler(args, this.getToolContext())
-    );
-
-    this.registerTool(
-      CreateDeploymentTool.name,
-      { description: CreateDeploymentTool.description, inputSchema: CreateDeploymentTool.parameters },
-      async (args) => CreateDeploymentTool.handler(args, this.getToolContext())
-    );
-
-    this.registerTool(
-      GetSDLsTool.name,
-      { description: GetSDLsTool.description, inputSchema: GetSDLsTool.parameters },
-      async (args) => GetSDLsTool.handler(args, this.getToolContext())
-    );
-
-    this.registerTool(
-      GetSDLTool.name,
-      { description: GetSDLTool.description, inputSchema: GetSDLTool.parameters },
-      async (args) => GetSDLTool.handler(args, this.getToolContext())
-    );
-
-    this.registerTool(
-      SendManifestTool.name,
-      { description: SendManifestTool.description, inputSchema: SendManifestTool.parameters },
-      async (args) => SendManifestTool.handler(args, this.getToolContext())
-    );
-
-    this.registerTool(
-      CreateLeaseTool.name,
-      { description: CreateLeaseTool.description, inputSchema: CreateLeaseTool.parameters },
-      async (args) => CreateLeaseTool.handler(args, this.getToolContext())
-    );
-
-    this.registerTool(
-      GetServicesTool.name,
-      { description: GetServicesTool.description, inputSchema: GetServicesTool.parameters },
-      async (args) => GetServicesTool.handler(args, this.getToolContext())
-    );
-
-    this.registerTool(
-      UpdateDeploymentTool.name,
-      { description: UpdateDeploymentTool.description, inputSchema: UpdateDeploymentTool.parameters },
-      async (args) => UpdateDeploymentTool.handler(args, this.getToolContext())
-    );
-
-    this.registerTool(
-      AddFundsTool.name,
-      { description: AddFundsTool.description, inputSchema: AddFundsTool.parameters },
-      async (args) => AddFundsTool.handler(args, this.getToolContext())
-    );
-
-    this.registerTool(
-      GetBalancesTool.name,
-      { description: GetBalancesTool.description, inputSchema: GetBalancesTool.parameters },
-      async (args) => GetBalancesTool.handler(args, this.getToolContext())
-    );
-
-    this.registerTool(
-      CloseDeploymentTool.name,
-      { description: CloseDeploymentTool.description, inputSchema: CloseDeploymentTool.parameters },
-      async (args) => CloseDeploymentTool.handler(args, this.getToolContext())
-    );
-
-    this.registerTool(
-      GetDeploymentTool.name,
-      { description: GetDeploymentTool.description, inputSchema: GetDeploymentTool.parameters },
-      async (args) => GetDeploymentTool.handler(args, this.getToolContext())
-    );
+    for (const tool of tools) {
+      this.registerTool(
+        tool.name,
+        { description: tool.description, inputSchema: tool.parameters },
+        async (args) => {
+          const paramSummary = summarizeParams(args);
+          console.log(`[tool] ${tool.name}${paramSummary} ...`);
+          const start = Date.now();
+          try {
+            const result = await tool.handler(args, this.getToolContext());
+            const summary = summarizeResult(tool.name, result);
+            console.log(`[tool] ${tool.name} done ${Date.now() - start}ms${summary ? ` — ${summary}` : ''}`);
+            return result;
+          } catch (err: any) {
+            console.error(`[tool] ${tool.name} FAIL ${Date.now() - start}ms — ${err.message ?? err}`);
+            throw err;
+          }
+        },
+      );
+    }
   }
+
   public isInitialized(): boolean {
     return this.wallet !== null && this.sdk !== null && this.certificate !== null;
   }

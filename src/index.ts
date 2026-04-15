@@ -82,7 +82,7 @@ async function main() {
   if (mode === 'http') {
     const port = Number(SERVER_CONFIG.port);
     const httpServer = createServer(async (req, res) => {
-      console.log(`${req.method} ${req.url}`);
+      // Tool-level logging is in AkashMCP.registerTools()
 
       try {
         if (req.method === 'POST') await handlePost(req, res);
